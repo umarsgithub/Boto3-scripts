@@ -4,8 +4,8 @@ key_to_find = 'Backup'
 backupvalues = ['yes', 'no']
 
 filename = time.strftime("%d%m%y" + "backuptag.csv")
-oldfilepath = ("/home/umar.hussain/" + filename)
-newfilepath = ("SAC/backuptag/" + filename)
+oldfilepath = ("/tmp/" + filename)
+newfilepath = ("S3bucket/folder/" + filename)
 
 
 with open(oldfilepath, "w", newline="") as csvfile:
@@ -14,7 +14,7 @@ with open(oldfilepath, "w", newline="") as csvfile:
 
 secretsManagerclient = boto3.client('secretsmanager')
 secretresponse = secretsManagerclient.get_secret_value(
-    SecretId = 'dev/test/sacreports'
+    SecretId = 'my/secret/name'
 )
 credsdict = json.loads(secretresponse['SecretString'])
 
@@ -113,4 +113,4 @@ for key, value in credsdict.items():
 
 s3 = boto3.client('s3')
 with open(oldfilepath, "rb") as f:
-    s3.upload_fileobj(f, "veotechops", newfilepath)   
+    s3.upload_fileobj(f, "mybucketname", newfilepath)   
