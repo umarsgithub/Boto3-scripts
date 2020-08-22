@@ -106,7 +106,6 @@ for key, value in credsdict.items():
             elif key_to_find not in [tag['Key'] for tag in rdstags]:
                 Backuptag = "not found"
             if key_to_find not in [tag['Key'] for tag in rdstags]:
-            #print(db_Instance_ID, " ", Backuptag)
             with open(oldfilepath, "a+", newline="") as csvfile:
                 tagwriter = csv.writer(csvfile)
                 tagwriter.writerow(["RDS Instance", "Backuptag not found", db_Instance_ID])
