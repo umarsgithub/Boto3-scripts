@@ -1,0 +1,354 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+A cloudformation template which can be used for the deployment of a lambda function which can query multiple AWS accounts from a package stored in S3 along with the IAM role & necessary policies to assume roles.
+  
+  Refer to the README.md file in the GitHub repository for 
+  details on customistation and usage.
+
+# Provide mappings to CFN Stacks to import required values - e.g. Network Stack Subnet IDs
+# Commonly only the Infrastructure Network Stack will be required, however, if additional
+# stacks need to be referenced, detail them here
+Mappings:
+  NetworkStackName: 
+    eu-west-1: 
+      prd: "prd-inf-network-stack"
+      pre: "pre-inf-network-stack"
+      dev: "dev-inf-network-stack"
+    eu-west-2: 
+      prd: "prd-inf-network-stack"
+      pre: "pre-inf-network-stack"
+      dev: "dev-inf-network-stack"
+  LambdaUpdaterStackName: 
+    eu-west-1: 
+      prd: "prd-inf-lambda-updater-stack"
+      pre: "pre-inf-lambda-updater-stack"
+      dev: "dev-inf-lambda-updater-stack"
+    eu-west-2: 
+      prd: "prd-inf-lambda-updater-stack"
+      pre: "pre-inf-lambda-updater-stack"
+      dev: "dev-inf-lambda-updater-stack"
+
+#Add additional stack mappings as required or remove section
+#  AdditionalStackName: 
+#    eu-west-1: 
+#      prd: "prd-..." 
+#      pre: "pre-..."
+#      dev: "dev-..."
+#    eu-west-2: 
+#      prd: "prd-..."
+#      pre: "pre-..."
+#      dev: "dev-..."
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Specify Environment Details
+        Parameters:
+          - Environment
+          - Application
+          - NotificationEmail
+          - SecretmanagersecretARN
+      -
+        Label:
+          default: Specify Lambda Function Parameters
+        Parameters:
+          - LambdaFunctionMemSize
+          - LambdaRuntime
+          - LambdaHandler
+          - FunctionPurpose
+          - EnvVar<Name>
+          - VpcHosted
+      -
+        Label:
+          default: Specify Tags to be Applied to Resources
+        Parameters:
+          - ApplicationCriticality
+          - EntityOperational
+          - EntityBilling
+
+Parameters:
+  Environment: 
+    Description: "Specifies the deployment environment for the Lambda Function"
+    Type: String
+    AllowedValues:
+      - prd
+      - pre
+      - dev
+  Application:
+    Description: "Specifies the name of the Application/Function the Lambda function will be used for (match folder name in s3 bucket)"
+    Type: String
+    Default: ""
+  NotificationEmail:
+    Description: "Optional (PRD only) - Specifies the Email address to be notified when alerts are triggered"
+    Type: String
+  SecretmanagersecretARN:
+    Description: "ARN for the secret containing the assume roles the lambda function will use"
+    Type: String
+  LambdaFunctionMemSize: 
+    Description: "Specifies the Memory Size for the Lambda Function"
+    Type: String
+    AllowedValues: [ "128", "192", "256", "320", "384", "448", "512", "576", "640", "704", "768", "832", "896", "960", "1024", "1088", "1152", "1216", "1280", "1344", "1408", "1472", "1536", "1600", "1664", "1728", "1792", "1856", "1920", "1984", "2048", "2112", "2176", "2240", "2304", "2368", "2432", "2496", "2560", "2624", "2688", "2752", "2816", "2880", "2944", "3008"]
+    Default: "128"
+  LambdaRuntime:
+    Description: "Specifies the Runtime for the Lambda Function"
+    Type: String
+    AllowedValues: [ "nodejs", "nodejs4.3", "nodejs6.10", "nodejs8.10", "java8", "python2.7", "python3.6", "python3.7", "python3.8", "dotnetcore1.0", "dotnetcore2.0", "go1.x" ]
+    Default: "python3.8"
+  LambdaHandler:
+    Description: "Specifies the handler for the Lambda Functions.  Important: Update based on LambdaRuntime parameter"
+    Type: String
+    Default: "lambda_handler"
+  LambdaTimeout:
+    Description: "Specifies the max time in seconds the lambda function can run for"
+    Type: String
+    AllowedValues: ["60", "120", "180", "240", "300"]
+    Default: "60"
+  FunctionPurpose: 
+    Description: "Specifies the purpose that Lambda Function performs"
+    Type: String 
+  # Duplicate and modify Environment Variables as required 
+  # EnvVar<Name>:
+  #   Description: "Specifies the <Name> Environment variable for Lambda Function"
+  #   Type: String
+  VpcHosted:
+    Description: "Specify if the Lambda function is required to be run in the VPC"
+    Type: String
+    AllowedValues: [ "true", "false" ]
+    Default: "false"
+  ApplicationCriticality:
+    Type: String
+    Description: Specifies the Criticality Classification of the application, i.e. Low/Medium/High
+    AllowedValues:
+      - Low
+      - Medium
+      - High
+  EntityOperational: 
+    Description: "Specifies the 'Entity - Operational' Tag Value."
+    Type: String
+    MinLength: 1
+    MaxLength: 256
+    AllowedPattern: "^[a-zA-Z _-][-a-zA-Z0-9 _-]*$"
+    Default: "IT department"
+  EntityBilling: 
+    Description: "Specifies the 'Entity - Billing' Tag Value."
+    Type: String
+    MinLength: 1
+    MaxLength: 256
+    AllowedPattern: "^[a-zA-Z0-9][-a-zA-Z0-9]*$"
+    Default: 1234567789
+
+Conditions:
+  IsProduction:
+    !Equals [ !Ref "Environment", 'prd' ]
+  IsVpcHosted:
+    !Equals [ !Ref VpcHosted, "true" ]
+
+Resources:
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties: 
+      Code:
+        S3Bucket:
+          Fn::ImportValue:
+            !Join ["-", [ !FindInMap [ LambdaUpdaterStackName, !Ref "AWS::Region", !Ref Environment ], "S3BucketName" ] ] 
+        S3Key: !Join [ "", [ !Ref "Application", "/", !Ref FunctionPurpose, ".zip" ] ]
+      Description: !Join [ " ", [ "Lambda Function for", !Ref "Application", !Ref FunctionPurpose ] ]
+      # Environment:
+      #   Variables:
+      #     EnvironmentVariableName: !Ref EnvVar<Name>
+          # Additional Environment Variables can be placed here
+      FunctionName: !Join [ "-", [ !Ref "Environment", "lbd", !Ref "Application", !Ref FunctionPurpose ] ]
+      Handler: !Join [ ".", [!Ref FunctionPurpose, !Ref LambdaHandler ] ]
+      MemorySize: !Ref LambdaFunctionMemSize
+      Role: !GetAtt LambdaFunctionIamRole.Arn
+      Runtime: !Ref LambdaRuntime
+      Timeout: !Ref LambdaTimeout
+      VpcConfig: !If
+        - IsVpcHosted
+        - SecurityGroupIds:
+            - !Ref LambdaFunctionSecurityGroup
+          SubnetIds:
+            - Fn::ImportValue:
+                !Join ["-", [ !FindInMap [ "NetworkStackName", !Ref "AWS::Region", !Ref Environment ], "intSubnet01" ] ] 
+            - Fn::ImportValue:
+                !Join ["-", [ !FindInMap [ "NetworkStackName", !Ref "AWS::Region", !Ref Environment ], "intSubnet02" ] ] 
+        - !Ref "AWS::NoValue"
+      Tags: 
+        - Key: "Name"
+          Value: !Join [ "-", [ !Ref "Environment", "lbd", !Ref "Application", !Ref FunctionPurpose ] ]
+        - Key: "Entity - Operational"
+          Value: !Ref EntityOperational
+        - Key: "Entity - Billing"
+          Value: !Ref EntityBilling
+        - Key: "Application"
+          Value: !Ref Application
+        - Key: "Env"
+          Value: !Ref Environment
+        - Key: "Role"
+          Value: !Join [ " - ", [ "Lambda Function", !Ref FunctionPurpose ] ]
+  LambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DependsOn: LambdaFunction
+    Properties: 
+      LogGroupName: !Join [ "", [ "/aws/lambda/", !Ref LambdaFunction ] ]
+      RetentionInDays: 14
+  LambdaFunctionIamRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Principal: 
+              Service: 
+                - "lambda.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/"
+      RoleName: 
+        !Join [ "-", [ !Ref "Environment", "role", !Ref "Application", "lbd", !Ref FunctionPurpose, !Ref "AWS::Region" ] ]
+      ManagedPolicyArns: [
+        "arn:aws:iam::aws:policy/AmazonS3FullAccess",
+        !Ref IAMPolicy
+      ]
+              
+#Additional policies
+  IAMPolicy:
+    Type: "AWS::IAM::ManagedPolicy"
+    Properties:
+      ManagedPolicyName: !Join [ "-", [ !Ref "Environment", "Policy", !Ref "Application", "lbd", !Ref FunctionPurpose, !Ref "AWS::Region" ] ]
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Action: [
+              "logs:CreateLogGroup",
+              "logs:CreateLogStream",
+              "logs:PutLogEvents"
+            ]
+            Resource: !Sub "arn:aws:logs:*:*:log-group:/aws/lambda/${Environment}-lbd-${Application}:log-stream:*"
+          - !If
+            - IsVpcHosted
+            - Effect: "Allow"
+              Action: [
+                "ec2:CreateNetworkInterface",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:DeleteNetworkInterface"
+              ]
+              Resource: "*"
+            - !Ref "AWS::NoValue"
+          -
+            Effect: "Allow"
+            Action: "s3:ListBucket"
+            Resource:
+              Fn::ImportValue:
+                !Join ["-", [ !FindInMap [ LambdaUpdaterStackName, !Ref "AWS::Region", !Ref Environment ], "S3BucketARN" ] ]
+          -
+            Effect: "Allow"
+            Action: "s3:GetObject"
+            Resource: 
+              !Join
+              - ""
+              - - Fn::ImportValue:
+                    !Join ["-", [ !FindInMap [ LambdaUpdaterStackName, !Ref "AWS::Region", !Ref Environment ], "S3BucketARN" ] ]
+                - "/"
+                - !Ref Application
+                - "/*"
+          -  #the below allows the lambda function to assume roles in different AWS accounts to query resources
+            Effect: "Allow"
+            Action: 
+              - "sts:AssumeRole"             
+            Resource: [
+              "arn:aws:iam::ACCOUNTNUMBERHERE:role/pre-RoleforTechReports",
+              "arn:aws:iam::ACCOUNTNUMBERHERE:role/dev-RoleforTechReports",
+              "arn:aws:iam::ACCOUNTNUMBERHERE:role/prd-RoleforTechReports"
+            ]
+          -  
+            Effect: "Allow"
+            Action: 
+              - "secretsmanager:GetSecretValue"
+            Resource: 
+              !Ref "SecretmanagersecretARN"          
+              #-
+                # Insert additional resource policies here as required
+  LambdaFunctionSecurityGroup:
+    Condition: IsVpcHosted
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: !Join [ "-", [ !Ref "Environment", "sg", !Ref "Application", "lbd", !Ref FunctionPurpose ] ]
+      GroupDescription: !Join [ " ", [ Security Group for the, !Ref FunctionPurpose, Lambda Function ] ]
+      SecurityGroupEgress:
+        - 
+          IpProtocol: "-1"
+          FromPort: "-1"
+          ToPort: "-1"
+          CidrIp: "0.0.0.0/0"
+      VpcId: 
+        Fn::ImportValue:
+          !Join ["-", [ !FindInMap [ NetworkStackName, !Ref "AWS::Region", !Ref Environment ], "VPCID" ] ] 
+      Tags: 
+        - Key: "Name"
+          Value: !Join [ "-", [ !Ref "Environment", "sg", !Ref "Application", "lbd", !Ref FunctionPurpose ] ]
+        - Key: "Entity - Operational"
+          Value: !Ref EntityOperational
+        - Key: "Entity - Billing"
+          Value: !Ref EntityBilling
+        - Key: "Application"
+          Value: !Ref Application
+        - Key: "Env"
+          Value: !Ref Environment
+        - Key: "Role"
+          Value: !Join [ " ", [ "Security Group -", !Ref Application,  "Lambda Functions" ] ]
+  LambdaFunctionErrorAlarm:
+    Condition: IsProduction
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      ActionsEnabled: True
+      AlarmActions:
+      - 
+        !Ref AlarmNotification
+      AlarmDescription: !Sub "Alarm for ${Application} ${FunctionPurpose} Lambda Function Errors"
+      AlarmName: !Join [ "-",  [!Ref Environment, "alarm", !Ref Application, !Ref FunctionPurpose, "lambda-errors" ] ]
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+      - Name: FunctionName
+        Value: !Ref LambdaFunction
+      EvaluationPeriods: '1'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 60
+      Statistic: Sum
+      Threshold: '1'
+  AlarmNotification:
+    Condition: IsProduction
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: !Join [ "-", [ !Ref Environment, "topic", !Ref Application, !Ref FunctionPurpose, "email-alerts" ] ]
+      Subscription:
+        -
+          Endpoint: !Ref NotificationEmail
+          Protocol: email
+      TopicName: !Join [ "-", [ !Ref Environment, "topic", !Ref Application, !Ref FunctionPurpose, "email-alerts" ] ]
+
+Outputs:
+  LambdaFunctionName:
+    Description: "The Name of the Lambda Function"
+    Value: !Ref LambdaFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-${FunctionPurpose}Name"
+  LambdaFunctionARN:
+    Description: "The ARN of the Lambda Function"
+    Value: !GetAtt LambdaFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-${FunctionPurpose}ARN"
+  LambdaSGID:
+    Condition: IsVpcHosted
+    Description: "The ID of the Lambda Function Security Group"
+    Value: !GetAtt LambdaFunctionSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaSGID"
