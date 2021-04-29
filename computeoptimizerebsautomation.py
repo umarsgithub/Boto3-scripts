@@ -56,16 +56,31 @@ def lambda_handler(event, context):
                                 varn = vr['volumeArn']
                                 varnsplit = varn.split("/", 1)
                                 vid = varnsplit[1]
-                  #just in case specific volumes need to be excluded from automation
                                 if vid not in excludedVolumeids:
                                     print(vid, vroption['rank'], vroption['performanceRisk'], vr['currentConfiguration']['volumeType'])
-                                    #the try & except is so that if the dryrun is true, output will still be logged
-                                    try:
-                                        ec2client.modify_volume(VolumeId=vid,
-                                            VolumeType= vroption['configuration']['volumeType'], 
-                                            Iops= vroption['configuration']['volumeBaselineIOPS'],
-                                            Throughput= vroption['configuration']['volumeBaselineThroughput'],
-                                            Size= vroption['configuration']['volumeSize'],
-                                            DryRun=False)
-                                    except Exception as error:
-                                        print(f'Error: {error}')
+                                    if vroption['configuration']['volumeType'] == "gp3":
+                                        try:
+                                            print(f"Modified {vid} Settings",
+                                            f"size: {vroption['configuration']['volumeSize']}",
+                                            f"Throughput: {vroption['configuration']['volumeBaselineThroughput']}",
+                                            f"Iops: {vroption['configuration']['volumeBaselineIOPS']}",
+                                            f"VolumeType: {vroption['configuration']['volumeType']}")
+                                            ec2client.modify_volume(VolumeId=vid,
+                                                VolumeType= vroption['configuration']['volumeType'], 
+                                                Iops= vroption['configuration']['volumeBaselineIOPS'],
+                                                Throughput= vroption['configuration']['volumeBaselineThroughput'],
+                                                Size= vroption['configuration']['volumeSize'],
+                                                DryRun=True)
+                                        except Exception as error:
+                                            print(f'Error: {error}')
+                                    elif vroption['configuration']['volumeType'] == "io1" or "io2":
+                                        try:
+                                            ec2client.modify_volume(VolumeId=vid,
+                                                VolumeType= vroption['configuration']['volumeType'], 
+                                                Iops= vroption['configuration']['volumeBaselineIOPS'],
+                                                Size= vroption['configuration']['volumeSize'],
+                                                DryRun=False)
+                                        except Exception as error:
+                                            print(f'Error: {error}')
+                                else:
+                                    print(f"Volume {vid} currently in excluded list")
